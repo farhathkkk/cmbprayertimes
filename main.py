@@ -6,7 +6,7 @@ import requests
 from telegram import Bot
 from flask import Flask
 
-# Read from environment variables
+# Read sensitive data securely from environment variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
@@ -35,31 +35,37 @@ def extract_tomorrow_prayers():
     return None
 
 def send_daily_prayers():
-    download_pdf()
-    raw = extract_tomorrow_prayers()
-    if not raw:
-        print("No prayer time found.")
-        return
-    parts = raw.split()
-    if len(parts) < 7:
-        print("Line format error.")
-        return
+    try:
+        download_pdf()
+        raw = extract_tomorrow_prayers()
+        if not raw:
+            print("No prayer time found.")
+            return "No prayer time found."
 
-    date_str = (datetime.datetime.now() + datetime.timedelta(days=1)).strftime("%d %B %Y")
-    msg = (
-        f"Prayer Times - Colombo (Sri Lanka)\n"
-        f"{date_str}\n\n"
-        f"Fajr - {parts[1]}\n"
-        f"Sunrise - {parts[2]}\n"
-        f"Luhar - {parts[3]}\n"
-        f"Asar - {parts[4]}\n"
-        f"Maghrib - {parts[5]}\n"
-        f"Isha - {parts[6]}\n\n"
-        f"{{ACJU}}"
-    )
-    bot.send_message(chat_id=CHAT_ID, text=msg)
+        parts = raw.split()
+        if len(parts) < 7:
+            print("Line format error.")
+            return "Prayer time line format error."
 
-# Flask app
+        date_str = (datetime.datetime.now() + datetime.timedelta(days=1)).strftime("%d %B %Y")
+        msg = (
+            f"Prayer Times - Colombo (Sri Lanka)\n"
+            f"{date_str}\n\n"
+            f"Fajr - {parts[1]}\n"
+            f"Sunrise - {parts[2]}\n"
+            f"Luhar - {parts[3]}\n"
+            f"Asar - {parts[4]}\n"
+            f"Maghrib - {parts[5]}\n"
+            f"Isha - {parts[6]}\n\n"
+            f"{{ACJU}}"
+        )
+        bot.send_message(chat_id=CHAT_ID, text=msg)
+        return "Prayer times sent!"
+    except Exception as e:
+        print("Error:", e)
+        return f"Failed: {e}"
+
+# Flask app for Render and manual test
 app = Flask(__name__)
 
 @app.route('/')
@@ -67,9 +73,11 @@ def home():
     return "Prayer Times Bot is running!"
 
 @app.route('/send')
-def manual_trigger():
-    send_daily_prayers()
-    return "Prayer times sent!"
+def manual_send():
+    return send_daily_prayers()
 
+# Auto-send as soon as the app starts
 if __name__ == '__main__':
+    print("Sending prayer times on startup...")
+    send_daily_prayers()  # 🔥 Send once automatically when service starts
     app.run(host='0.0.0.0', port=8080)
