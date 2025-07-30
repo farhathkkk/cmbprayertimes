@@ -1,11 +1,6 @@
 services:
   - type: web
-    name: colombo-prayer-bot
-    runtime: python
+    name: your-service-name
     env: python
     buildCommand: ""
     startCommand: "python main.py"
-    plan: free
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.8
