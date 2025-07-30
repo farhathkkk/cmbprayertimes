@@ -1,85 +1,98 @@
 # main.py
+
 import os
 import fitz  # PyMuPDF
 import datetime
 import requests
 from telegram import Bot
-from apscheduler.schedulers.background import BackgroundScheduler
-import pytz
+import time
 from flask import Flask
+import threading
 
-# Load credentials securely
+# === CONFIG ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-
 GITHUB_PDF_URL = 'https://github.com/farhathkkk/acju-prayer-times/raw/main/Prayer-Times-{month}-2025-COLOMBO.pdf'
 LOCAL_PDF = 'today.pdf'
 
 bot = Bot(token=BOT_TOKEN)
 
-def download_pdf():
-    month = datetime.datetime.now().strftime('%B')
+def download_pdf(tomorrow):
+    month = tomorrow.strftime('%B')  # e.g., July
     url = GITHUB_PDF_URL.format(month=month)
     response = requests.get(url)
     with open(LOCAL_PDF, 'wb') as f:
         f.write(response.content)
 
-def extract_tomorrow_prayers():
-    tomorrow = datetime.datetime.now(pytz.timezone("Asia/Colombo")) + datetime.timedelta(days=1)
-    day = tomorrow.day
+def extract_tomorrows_prayers():
+    tomorrow = datetime.datetime.now() + datetime.timedelta(days=1)
     doc = fitz.open(LOCAL_PDF)
+    tomorrow_str = tomorrow.strftime('%-d-%b')  # e.g., '31-Jul'
+
     for page in doc:
         lines = page.get_text().split('\n')
-        for line in lines:
-            if line.startswith(f"{day}-Jul") or line.startswith(f"{day} "):
-                print("Matched line:", line)
-                return line
-    return None
+        for i, line in enumerate(lines):
+            if line.strip() == tomorrow_str and i + 7 < len(lines):
+                full_line = (
+                    lines[i] + " " +
+                    lines[i + 1] + " " +
+                    lines[i + 2] + " " +
+                    lines[i + 3] + " " +
+                    lines[i + 4] + " " +
+                    lines[i + 5] + " " +
+                    lines[i + 6]
+                )
+                print("Matched line:", full_line)
+                return full_line, tomorrow
+    return None, tomorrow
 
 def send_daily_prayers():
-    try:
-        download_pdf()
-        raw = extract_tomorrow_prayers()
-        if not raw:
-            print("No prayer time found.")
-            return
-        parts = raw.split()
-        if len(parts) < 7:
-            print("Line format error.")
-            return
+    tomorrow = datetime.datetime.now() + datetime.timedelta(days=1)
+    download_pdf(tomorrow)
+    raw, t_date = extract_tomorrows_prayers()
+    if not raw:
+        print("No prayer time found.")
+        return
 
-        date_str = (datetime.datetime.now(pytz.timezone("Asia/Colombo")) + datetime.timedelta(days=1)).strftime("%d %B %Y")
-        msg = (
-            f"Prayer Times - Colombo (Sri Lanka)\n"
-            f"{date_str}\n\n"
-            f"Fajr - {parts[1]}\n"
-            f"Sunrise - {parts[2]}\n"
-            f"Luhar - {parts[3]}\n"
-            f"Asar - {parts[4]}\n"
-            f"Maghrib - {parts[5]}\n"
-            f"Isha - {parts[6]}\n\n"
-            f"{{ACJU}}"
-        )
-        bot.send_message(chat_id=CHAT_ID, text=msg)
-        print("Prayer times sent!")
-    except Exception as e:
-        print("Error sending prayer times:", e)
+    parts = raw.split()
+    if len(parts) < 13:
+        print("Line format error.")
+        return
 
-# === Flask app to keep service alive ===
-app = Flask(__name__)
+    date_str = t_date.strftime("%d %B %Y")
+    msg = (
+        f"Prayer Times - Colombo (Sri Lanka)\n"
+        f"{date_str}\n\n"
+        f"Fajr - {parts[1]} {parts[2]}\n"
+        f"Sunrise - {parts[3]} {parts[4]}\n"
+        f"Luhar - {parts[5]} {parts[6]}\n"
+        f"Asar - {parts[7]} {parts[8]}\n"
+        f"Maghrib - {parts[9]} {parts[10]}\n"
+        f"Isha - {parts[11]} {parts[12]}\n\n"
+        f"{{ACJU}}"
+    )
+
+    bot.send_message(chat_id=CHAT_ID, text=msg)
+
+# === DAILY SCHEDULER ===
+def scheduler_loop():
+    while True:
+        now = datetime.datetime.now()
+        if now.hour == 19 and now.minute == 25:
+            send_daily_prayers()
+            time.sleep(60)
+        time.sleep(20)
+
+# Start scheduler in a background thread
+threading.Thread(target=scheduler_loop).start()
+
+# === KEEP RENDER OR REPLIT ALIVE ===
+app = Flask('')
 
 @app.route('/')
 def home():
-    return "Prayer Times Bot is Running!"
+    return "Bot is alive!"
 
-# === Scheduler setup ===
-scheduler = BackgroundScheduler(timezone=pytz.timezone("Asia/Colombo"))
-scheduler.add_job(send_daily_prayers, trigger='cron', hour=18, minute=40)
-scheduler.start()
-
-# === Send prayer times immediately on launch ===
-send_daily_prayers()
-
-# === Run Flask server ===
 if __name__ == '__main__':
+    send_daily_prayers()  # Send immediately on startup
     app.run(host='0.0.0.0', port=8080)
