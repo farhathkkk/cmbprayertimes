@@ -4,11 +4,9 @@ import fitz  # PyMuPDF
 import datetime
 import requests
 from telegram import Bot
-from apscheduler.schedulers.background import BackgroundScheduler
-import pytz
 from flask import Flask
 
-# Read sensitive data securely from environment variables
+# Read from environment variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
@@ -61,17 +59,17 @@ def send_daily_prayers():
     )
     bot.send_message(chat_id=CHAT_ID, text=msg)
 
-# Scheduler setup (Asia/Colombo = GMT+5:30)
-scheduler = BackgroundScheduler(timezone=pytz.timezone("Asia/Colombo"))
-scheduler.add_job(send_daily_prayers, trigger='cron', hour=18, minute=40)
-scheduler.start()
-
-# Flask app to keep it running on Render
+# Flask app
 app = Flask(__name__)
 
 @app.route('/')
 def home():
     return "Prayer Times Bot is running!"
+
+@app.route('/send')
+def manual_trigger():
+    send_daily_prayers()
+    return "Prayer times sent!"
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
