@@ -4,6 +4,7 @@ import fitz  # PyMuPDF
 import datetime
 import requests
 from telegram import Bot
+import pytz
 from flask import Flask
 
 # Read sensitive data securely from environment variables
@@ -23,7 +24,7 @@ def download_pdf():
         f.write(response.content)
 
 def extract_tomorrow_prayers():
-    tomorrow = datetime.datetime.now() + datetime.timedelta(days=1)
+    tomorrow = datetime.datetime.now(pytz.timezone("Asia/Colombo")) + datetime.timedelta(days=1)
     day = tomorrow.day
     doc = fitz.open(LOCAL_PDF)
     for page in doc:
@@ -40,14 +41,13 @@ def send_daily_prayers():
         raw = extract_tomorrow_prayers()
         if not raw:
             print("No prayer time found.")
-            return "No prayer time found."
-
+            return
         parts = raw.split()
         if len(parts) < 7:
             print("Line format error.")
-            return "Prayer time line format error."
+            return
 
-        date_str = (datetime.datetime.now() + datetime.timedelta(days=1)).strftime("%d %B %Y")
+        date_str = (datetime.datetime.now(pytz.timezone("Asia/Colombo")) + datetime.timedelta(days=1)).strftime("%d %B %Y")
         msg = (
             f"Prayer Times - Colombo (Sri Lanka)\n"
             f"{date_str}\n\n"
@@ -60,24 +60,20 @@ def send_daily_prayers():
             f"{{ACJU}}"
         )
         bot.send_message(chat_id=CHAT_ID, text=msg)
-        return "Prayer times sent!"
+        print("Prayer times sent successfully.")
     except Exception as e:
-        print("Error:", e)
-        return f"Failed: {e}"
+        print("Error while sending prayer times:", e)
 
-# Flask app for Render and manual test
+# 🌐 Flask server to keep it alive
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Prayer Times Bot is running!"
+    return "Prayer Times Bot sent today's prayer times!"
 
-@app.route('/send')
-def manual_send():
-    return send_daily_prayers()
+# 🚀 Send prayer times immediately on app start
+send_daily_prayers()
 
-# Auto-send as soon as the app starts
+# Run the Flask app
 if __name__ == '__main__':
-    print("Sending prayer times on startup...")
-    send_daily_prayers()  # 🔥 Send once automatically when service starts
     app.run(host='0.0.0.0', port=8080)
