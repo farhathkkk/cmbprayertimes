@@ -1,4 +1,5 @@
 # main.py
+import os
 import fitz  # PyMuPDF
 import datetime
 import requests
@@ -7,13 +8,16 @@ import threading
 import time
 from flask import Flask
 
-BOT_TOKEN = '8319603635:AAEFgIyAQrCm2Nc4-H4YN86k8_f7cBt3zsA'
-CHAT_ID = '@cmbprayertimes'  # or numeric ID for a user/chat
+# --- Secure Bot & Chat info from environment ---
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")  # e.g., '@cmbprayertimes'
+
 GITHUB_PDF_URL = 'https://github.com/farhathkkk/acju-prayer-times/raw/main/Prayer-Times-{month}-2025-COLOMBO.pdf'
 LOCAL_PDF = 'today.pdf'
 
 bot = Bot(token=BOT_TOKEN)
 
+# --- Download Monthly PDF ---
 def download_pdf():
     month = datetime.datetime.now().strftime('%B')
     url = GITHUB_PDF_URL.format(month=month)
@@ -21,6 +25,7 @@ def download_pdf():
     with open(LOCAL_PDF, 'wb') as f:
         f.write(response.content)
 
+# --- Extract tomorrow's prayer times from PDF ---
 def extract_tomorrow_prayers():
     tomorrow = datetime.datetime.now() + datetime.timedelta(days=1)
     day = tomorrow.day
@@ -33,6 +38,7 @@ def extract_tomorrow_prayers():
                 return line
     return None
 
+# --- Format & send the message ---
 def send_daily_prayers():
     download_pdf()
     raw = extract_tomorrow_prayers()
@@ -58,7 +64,7 @@ def send_daily_prayers():
     )
     bot.send_message(chat_id=CHAT_ID, text=msg)
 
-# Scheduler to run at 8:00 PM daily
+# --- Scheduler to run daily at 6:00 PM (18:00) ---
 def scheduler_loop():
     while True:
         now = datetime.datetime.now()
@@ -67,14 +73,14 @@ def scheduler_loop():
             time.sleep(60)
         time.sleep(20)
 
-# Flask app to keep server alive
+# --- Flask App to keep Render service alive ---
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot is running on Render!"
+    return "Prayer Times Bot is running!"
 
-# Start server and scheduler
+# --- Start scheduler in background ---
 threading.Thread(target=scheduler_loop).start()
 
 if __name__ == "__main__":
