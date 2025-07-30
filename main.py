@@ -7,8 +7,8 @@ import threading
 import time
 from flask import Flask
 
-BOT_TOKEN = 'YOUR_BOT_TOKEN'
-CHAT_ID = '@your_channel_username'  # or numeric ID for a user/chat
+BOT_TOKEN = '8319603635:AAEFgIyAQrCm2Nc4-H4YN86k8_f7cBt3zsA'
+CHAT_ID = '@cmbprayertimes'  # or numeric ID for a user/chat
 GITHUB_PDF_URL = 'https://github.com/farhathkkk/acju-prayer-times/raw/main/Prayer-Times-{month}-2025-COLOMBO.pdf'
 LOCAL_PDF = 'today.pdf'
 
