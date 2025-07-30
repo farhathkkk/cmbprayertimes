@@ -1,13 +1,12 @@
 # main.py
-
 import os
 import fitz  # PyMuPDF
 import datetime
 import requests
 from telegram import Bot
-import time
 from flask import Flask
-import threading
+from apscheduler.schedulers.background import BackgroundScheduler
+import pytz
 
 # === CONFIG ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -47,16 +46,17 @@ def extract_tomorrows_prayers():
     return None, tomorrow
 
 def send_daily_prayers():
+    print("[INFO] Running send_daily_prayers...")
     tomorrow = datetime.datetime.now() + datetime.timedelta(days=1)
     download_pdf(tomorrow)
     raw, t_date = extract_tomorrows_prayers()
     if not raw:
-        print("No prayer time found.")
+        print("[ERROR] No prayer time found.")
         return
 
     parts = raw.split()
     if len(parts) < 13:
-        print("Line format error.")
+        print("[ERROR] Line format error.")
         return
 
     date_str = t_date.strftime("%d %B %Y")
@@ -73,26 +73,20 @@ def send_daily_prayers():
     )
 
     bot.send_message(chat_id=CHAT_ID, text=msg)
+    print("[INFO] Message sent successfully.")
 
-# === DAILY SCHEDULER ===
-def scheduler_loop():
-    while True:
-        now = datetime.datetime.now()
-        if now.hour == 19 and now.minute == 25:
-            send_daily_prayers()
-            time.sleep(60)
-        time.sleep(20)
+# === APScheduler Setup ===
+scheduler = BackgroundScheduler(timezone=pytz.timezone("Asia/Colombo"))
+scheduler.add_job(send_daily_prayers, trigger='cron', hour=19, minute=32)
+scheduler.start()
+print("[INFO] Scheduler started for 7:25 PM daily (Asia/Colombo)")
 
-# Start scheduler in a background thread
-threading.Thread(target=scheduler_loop).start()
-
-# === KEEP RENDER OR REPLIT ALIVE ===
-app = Flask('')
+# === Keep the service alive ===
+app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot is alive!"
+    return "Prayer Times Bot is live!"
 
 if __name__ == '__main__':
-    send_daily_prayers()  # Send immediately on startup
     app.run(host='0.0.0.0', port=8080)
