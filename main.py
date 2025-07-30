@@ -4,10 +4,11 @@ import fitz  # PyMuPDF
 import datetime
 import requests
 from telegram import Bot
+from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
 from flask import Flask
 
-# Read sensitive data securely from environment variables
+# Load credentials securely
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
@@ -60,20 +61,25 @@ def send_daily_prayers():
             f"{{ACJU}}"
         )
         bot.send_message(chat_id=CHAT_ID, text=msg)
-        print("Prayer times sent successfully.")
+        print("Prayer times sent!")
     except Exception as e:
-        print("Error while sending prayer times:", e)
+        print("Error sending prayer times:", e)
 
-# 🌐 Flask server to keep it alive
+# === Flask app to keep service alive ===
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Prayer Times Bot sent today's prayer times!"
+    return "Prayer Times Bot is Running!"
 
-# 🚀 Send prayer times immediately on app start
+# === Scheduler setup ===
+scheduler = BackgroundScheduler(timezone=pytz.timezone("Asia/Colombo"))
+scheduler.add_job(send_daily_prayers, trigger='cron', hour=18, minute=40)
+scheduler.start()
+
+# === Send prayer times immediately on launch ===
 send_daily_prayers()
 
-# Run the Flask app
+# === Run Flask server ===
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
