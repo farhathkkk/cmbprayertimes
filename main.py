@@ -77,7 +77,7 @@ def send_daily_prayers():
 
 # === APScheduler Setup ===
 scheduler = BackgroundScheduler(timezone=pytz.timezone("Asia/Colombo"))
-scheduler.add_job(send_daily_prayers, trigger='cron', hour=09, minute=06)
+scheduler.add_job(send_daily_prayers, trigger='cron', hour=9, minute=8)
 scheduler.start()
 print("[INFO] Scheduler started for 7:25 PM daily (Asia/Colombo)")
 
