@@ -77,9 +77,9 @@ def send_daily_prayers():
 
 # === APScheduler Setup ===
 scheduler = BackgroundScheduler(timezone=pytz.timezone("Asia/Colombo"))
-scheduler.add_job(send_daily_prayers, trigger='cron', hour=9, minute=10)
+scheduler.add_job(send_daily_prayers, trigger='cron', hour=18, minute=30)
 scheduler.start()
-print("[INFO] Scheduler started for 7:25 PM daily (Asia/Colombo)")
+print("[INFO] Scheduler started for 6:30 PM daily (Asia/Colombo)")
 
 # === Keep the service alive ===
 app = Flask(__name__)
