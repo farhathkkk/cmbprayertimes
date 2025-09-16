@@ -1,4 +1,3 @@
-# main.py
 import os
 import fitz  # PyMuPDF
 import datetime
@@ -7,12 +6,15 @@ from telegram import Bot
 from flask import Flask
 from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
+import threading
+import time
 
 # === CONFIG ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 GITHUB_PDF_URL = 'https://github.com/farhathkkk/acju-prayer-times/raw/main/Prayer-Times-{month}-2025-COLOMBO.pdf'
 LOCAL_PDF = 'today.pdf'
+SELF_URL = os.getenv("SELF_URL")  # e.g., https://your-app.onrender.com
 
 bot = Bot(token=BOT_TOKEN)
 
@@ -81,12 +83,25 @@ scheduler.add_job(send_daily_prayers, trigger='cron', hour=18, minute=30)
 scheduler.start()
 print("[INFO] Scheduler started for 6:30 PM daily (Asia/Colombo)")
 
-# === Keep the service alive ===
+# === Flask App ===
 app = Flask(__name__)
 
 @app.route('/')
 def home():
     return "Prayer Times Bot is live!"
+
+# === Self-ping thread to prevent shutdown ===
+def keep_alive():
+    while True:
+        try:
+            if SELF_URL:
+                requests.get(SELF_URL)
+                print("[INFO] Self-ping successful")
+        except Exception as e:
+            print("[ERROR] Self-ping failed:", e)
+        time.sleep(600)  # ping every 10 minutes
+
+threading.Thread(target=keep_alive, daemon=True).start()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
