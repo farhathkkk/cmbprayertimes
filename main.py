@@ -60,24 +60,40 @@ def download_pdf_if_needed(target_date):
         return False
 
 def extract_tomorrows_prayers(tomorrow_date):
-    """Extracts prayer times for a specific date from the local PDF."""
+    """
+    Extracts prayer times for a specific date from the local PDF.
+    This version is robust and handles cases where the date and times
+    are on the same line or on separate lines.
+    """
     try:
         doc = fitz.open(LOCAL_PDF_FILENAME)
     except fitz.errors.FitzError as e:
         logging.error(f"Could not open or read the PDF file '{LOCAL_PDF_FILENAME}'. It may be corrupted. Error: {e}")
         return None
 
-    tomorrow_str = tomorrow_date.strftime('%#d-%b' if os.name == 'nt' else '%-d-%b') # Format for date, e.g., '23-Sep'
+    # Use a format string that works across platforms for day numbers (e.g., '1' not '01')
+    tomorrow_str = tomorrow_date.strftime('%#d-%b' if os.name == 'nt' else '%-d-%b') # e.g., '23-Sep'
 
     for page in doc:
         text = page.get_text("text")
         lines = text.split('\n')
-        for line in lines:
-            # **THE FIX**: Check if the line *starts with* the date string.
-            # This handles cases where date and times are on the same line.
-            if line.strip().startswith(tomorrow_str):
-                logging.info(f"Found matching line for '{tomorrow_str}': {line.strip()}")
-                return line.strip()
+        for i, line in enumerate(lines):
+            cleaned_line = line.strip()
+            # Find a line that starts with our target date string
+            if cleaned_line.startswith(tomorrow_str):
+                parts = cleaned_line.split()
+                # Case 1: The line contains the date AND times (many parts)
+                if len(parts) > 5:
+                    logging.info(f"Found full prayer time line for '{tomorrow_str}': {cleaned_line}")
+                    return cleaned_line
+                # Case 2: The line is JUST the date. The times must be on the next line.
+                elif i + 1 < len(lines):
+                    next_line = lines[i + 1].strip()
+                    # A quick check to make sure the next line looks like times (starts with a number)
+                    if next_line and next_line[0].isdigit():
+                        full_line = f"{cleaned_line} {next_line}"
+                        logging.info(f"Found date on one line and times on the next. Combined to: '{full_line}'")
+                        return full_line
     
     logging.warning(f"Could not find prayer times for date string '{tomorrow_str}' in the PDF.")
     return None
@@ -104,7 +120,7 @@ def send_daily_prayers():
             return
 
         parts = raw_line.split()
-        # **THE FIX**: Based on the PDF image, we expect 13 parts.
+        # Based on the PDF image, we expect 13 parts.
         # e.g., '23-Sep', '4:43', 'AM', '6:00', 'AM', ...
         if len(parts) < 13:
             logging.error(f"Line format error. Expected at least 13 parts, but got {len(parts)}: '{raw_line}'")
@@ -113,7 +129,7 @@ def send_daily_prayers():
 
         date_str = tomorrow.strftime("%A, %d %B %Y")
         
-        # **THE FIX**: Re-index the parts to combine time and AM/PM.
+        # Re-index the parts to combine time and AM/PM.
         fajr_time = f"{parts[1]} {parts[2]}"
         sunrise_time = f"{parts[3]} {parts[4]}"
         luhar_time = f"{parts[5]} {parts[6]}"
