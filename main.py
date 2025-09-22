@@ -1,197 +1,213 @@
 import os
-import fitz  # PyMuPDF
+
+import fitz  # PyMuPDF
+
 import datetime
+
 import requests
+
 from telegram import Bot
-from flask import Flask, request
+
+from flask import Flask
+
 from apscheduler.schedulers.background import BackgroundScheduler
+
 import pytz
-import logging
+
+import threading
+
 import time
 
-# --- Basic logging setup ---
-# This is better than print() for tracking issues on a server.
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# === CONFIGURATION ===
-try:
-    BOT_TOKEN = os.environ["BOT_TOKEN"]
-    CHAT_ID = os.environ["CHAT_ID"]
-    # A secret key to protect the manual trigger endpoint
-    TEST_TRIGGER_KEY = os.environ.get("TEST_TRIGGER_KEY", "default-secret-key")
-except KeyError as e:
-    logging.critical(f"FATAL: Environment variable {e} not set. The application cannot start.")
-    exit() # Exit if critical config is missing
 
-GITHUB_PDF_URL_TEMPLATE = 'https://github.com/farhathkkk/acju-prayer-times/raw/main/Prayer-Times-{month}-{year}-COLOMBO.pdf'
-LOCAL_PDF_FILENAME = 'prayer_times.pdf'
+# === CONFIG ===
 
-# Initialize the Telegram Bot
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+CHAT_ID = os.getenv("CHAT_ID")
+
+GITHUB_PDF_URL = 'https://github.com/farhathkkk/acju-prayer-times/raw/main/Prayer-Times-{month}-2025-COLOMBO.pdf'
+
+LOCAL_PDF = 'today.pdf'
+
+SELF_URL = os.getenv("SELF_URL")  # e.g., https://your-app.onrender.com
+
+
+
 bot = Bot(token=BOT_TOKEN)
 
-# === CORE LOGIC ===
 
-def download_pdf_if_needed(target_date):
-    """
-    Downloads the PDF for the target month only if it doesn't already exist
-    or if the month has changed. This prevents needless daily downloads.
-    """
-    month = target_date.strftime('%B')
-    year = target_date.strftime('%Y')
-    
-    if os.path.exists(LOCAL_PDF_FILENAME):
-        file_mod_time = datetime.datetime.fromtimestamp(os.path.getmtime(LOCAL_PDF_FILENAME))
-        if file_mod_time.strftime('%B') == month:
-            logging.info(f"PDF for {month} already exists. Skipping download.")
-            return True
 
-    logging.info(f"Downloading prayer times PDF for {month} {year}...")
-    url = GITHUB_PDF_URL_TEMPLATE.format(month=month, year=year)
+def download_pdf(tomorrow):
 
-    try:
-        response = requests.get(url, timeout=15)
-        response.raise_for_status()
-        with open(LOCAL_PDF_FILENAME, 'wb') as f:
-            f.write(response.content)
-        logging.info("PDF downloaded successfully.")
-        return True
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Failed to download PDF from {url}. Error: {e}")
-        return False
+    month = tomorrow.strftime('%B')  # e.g., July
 
-def extract_tomorrows_prayers(tomorrow_date):
-    """
-    Extracts prayer times for a specific date from the local PDF.
-    This version is more robust and handles cases where the date and times
-    are on the same line or on separate/subsequent lines.
-    """
-    try:
-        doc = fitz.open(LOCAL_PDF_FILENAME)
-    except fitz.errors.FitzError as e:
-        logging.error(f"Could not open or read the PDF file '{LOCAL_PDF_FILENAME}'. It may be corrupted. Error: {e}")
-        return None
+    url = GITHUB_PDF_URL.format(month=month)
 
-    # Use a format string that works across platforms for day numbers (e.g., '1' not '01')
-    tomorrow_str = tomorrow_date.strftime('%#d-%b' if os.name == 'nt' else '%-d-%b') # e.g., '23-Sep'
+    response = requests.get(url)
 
-    for page in doc:
-        text = page.get_text("text")
-        lines = text.split('\n')
-        for i, line in enumerate(lines):
-            cleaned_line = line.strip()
-            # Find a line that starts with our target date string
-            if cleaned_line.startswith(tomorrow_str):
-                parts = cleaned_line.split()
-                # Case 1: The line contains the date AND times (many parts)
-                if len(parts) > 5:
-                    logging.info(f"Found full prayer time line for '{tomorrow_str}': {cleaned_line}")
-                    return cleaned_line
-                
-                # Case 2: The line is JUST the date. We must find the next valid line with times.
-                elif i + 1 < len(lines):
-                    # Search from the next line onwards for a line that looks like times
-                    for next_line_candidate in lines[i+1:]:
-                        cleaned_next_line = next_line_candidate.strip()
-                        # The next valid line should not be empty and should start with a number (the time)
-                        if cleaned_next_line and cleaned_next_line[0].isdigit():
-                            full_line = f"{cleaned_line} {cleaned_next_line}"
-                            logging.info(f"Found date on one line and times on a subsequent line. Combined to: '{full_line}'")
-                            return full_line
-                    # If we loop through all subsequent lines and find nothing, this match was a dud.
-    
-    logging.warning(f"Could not find a valid prayer time entry for date string '{tomorrow_str}' in the PDF.")
-    return None
+    with open(LOCAL_PDF, 'wb') as f:
+
+        f.write(response.content)
+
+
+
+def extract_tomorrows_prayers():
+
+    tomorrow = datetime.datetime.now() + datetime.timedelta(days=1)
+
+    doc = fitz.open(LOCAL_PDF)
+
+    tomorrow_str = tomorrow.strftime('%-d-%b')  # e.g., '31-Jul'
+
+
+
+    for page in doc:
+
+        lines = page.get_text().split('\n')
+
+        for i, line in enumerate(lines):
+
+            if line.strip() == tomorrow_str and i + 7 < len(lines):
+
+                full_line = (
+
+                    lines[i] + " " +
+
+                    lines[i + 1] + " " +
+
+                    lines[i + 2] + " " +
+
+                    lines[i + 3] + " " +
+
+                    lines[i + 4] + " " +
+
+                    lines[i + 5] + " " +
+
+                    lines[i + 6]
+
+                )
+
+                print("Matched line:", full_line)
+
+                return full_line, tomorrow
+
+    return None, tomorrow
+
+
 
 def send_daily_prayers():
-    """
-    The main job executed by the scheduler. It handles the entire process
-    of downloading, parsing, and sending the prayer times.
-    """
-    try:
-        logging.info("Scheduler triggered. Running send_daily_prayers job...")
-        
-        colombo_tz = pytz.timezone("Asia/Colombo")
-        tomorrow = datetime.datetime.now(colombo_tz) + datetime.timedelta(days=1)
 
-        if not download_pdf_if_needed(tomorrow):
-            bot.send_message(chat_id=CHAT_ID, text="Alert: Could not download the prayer times PDF. The file might be missing from the GitHub repository.")
-            return
+    print("[INFO] Running send_daily_prayers...")
 
-        raw_line = extract_tomorrows_prayers(tomorrow)
-        if not raw_line:
-            date_to_find = tomorrow.strftime('%#d-%b' if os.name == 'nt' else '%-d-%b')
-            bot.send_message(chat_id=CHAT_ID, text=f"🔍 **Parsing Error** 🔍\n\nCould not find the prayer times for tomorrow ({date_to_find}) in the PDF. Please check the PDF's date format.")
-            return
+    tomorrow = datetime.datetime.now() + datetime.timedelta(days=1)
 
-        parts = raw_line.split()
-        # Based on the PDF image, we expect 13 parts.
-        # e.g., '23-Sep', '4:43', 'AM', '6:00', 'AM', ...
-        if len(parts) < 13:
-            logging.error(f"Line format error. Expected at least 13 parts, but got {len(parts)}: '{raw_line}'")
-            bot.send_message(chat_id=CHAT_ID, text=f"📄 **Parsing Error** 📄\n\nFound the line for tomorrow, but the format was incorrect:\n`{raw_line}`")
-            return
+    download_pdf(tomorrow)
 
-        date_str = tomorrow.strftime("%A, %d %B %Y")
-        
-        # Re-index the parts to combine time and AM/PM.
-        fajr_time = f"{parts[1]} {parts[2]}"
-        sunrise_time = f"{parts[3]} {parts[4]}"
-        luhar_time = f"{parts[5]} {parts[6]}"
-        asar_time = f"{parts[7]} {parts[8]}"
-        maghrib_time = f"{parts[9]} {parts[10]}"
-        isha_time = f"{parts[11]} {parts[12]}"
+    raw, t_date = extract_tomorrows_prayers()
 
-        msg = (
-            f"🕌 *Prayer Times - Colombo, Sri Lanka*\n"
-            f"📅 *{date_str}*\n\n"
-            f" Fajr\t\t\t- {fajr_time}\n"
-            f" Sunrise\t- {sunrise_time}\n"
-            f" Luhar\t\t- {luhar_time}\n"
-            f" Asar\t\t\t- {asar_time}\n"
-            f" Maghrib\t- {maghrib_time}\n"
-            f" Isha\t\t\t- {isha_time}\n\n"
-            f"Source: ACJU"
-        )
+    if not raw:
 
-        bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode='Markdown')
-        logging.info("Prayer times message sent successfully.")
+        print("[ERROR] No prayer time found.")
 
-    except Exception as e:
-        logging.critical(f"An unexpected error occurred in the 'send_daily_prayers' job: {e}", exc_info=True)
-        try:
-            bot.send_message(chat_id=CHAT_ID, text=f"🚨 **BOT ERROR** 🚨\n\nThe prayer times job failed with an error:\n`{e}`\n\nPlease check the logs.")
-        except Exception as telegram_error:
-            logging.error(f"Could not even send the error notification to Telegram: {telegram_error}")
+        return
 
-# === SCHEDULER SETUP ===
+
+
+    parts = raw.split()
+
+    if len(parts) < 13:
+
+        print("[ERROR] Line format error.")
+
+        return
+
+
+
+    date_str = t_date.strftime("%d %B %Y")
+
+    msg = (
+
+        f"Prayer Times - Colombo (Sri Lanka)\n"
+
+        f"{date_str}\n\n"
+
+        f"Fajr - {parts[1]} {parts[2]}\n"
+
+        f"Sunrise - {parts[3]} {parts[4]}\n"
+
+        f"Luhar - {parts[5]} {parts[6]}\n"
+
+        f"Asar - {parts[7]} {parts[8]}\n"
+
+        f"Maghrib - {parts[9]} {parts[10]}\n"
+
+        f"Isha - {parts[11]} {parts[12]}\n\n"
+
+        f"{{ACJU}}"
+
+    )
+
+
+
+    bot.send_message(chat_id=CHAT_ID, text=msg)
+
+    print("[INFO] Message sent successfully.")
+
+
+
+# === APScheduler Setup ===
+
 scheduler = BackgroundScheduler(timezone=pytz.timezone("Asia/Colombo"))
+
 scheduler.add_job(send_daily_prayers, trigger='cron', hour=18, minute=30)
+
 scheduler.start()
-logging.info("Scheduler started. Job is scheduled for 6:30 PM (Asia/Colombo) daily.")
+
+print("[INFO] Scheduler started for 6:30 PM daily (Asia/Colombo)")
 
 
-# === FLASK WEB SERVER ===
+
+# === Flask App ===
+
 app = Flask(__name__)
 
+
+
 @app.route('/')
+
 def home():
-    """A simple endpoint to confirm the bot is running."""
-    return "Prayer Times Bot is alive and the scheduler is running."
 
-@app.route('/test-prayers')
-def test_prayers():
-    """A manual trigger for the prayer time job for easy debugging."""
-    provided_key = request.args.get('key')
-    if provided_key != TEST_TRIGGER_KEY:
-        return "Unauthorized", 401
-    
-    logging.info("Manual trigger received for 'send_daily_prayers'.")
-    scheduler.add_job(send_daily_prayers, 'date')
-    return "OK, triggered the prayer time job. Check your Telegram and the logs.", 200
+    return "Prayer Times Bot is live!"
 
 
-# The main entry point for the application.
+
+# === Self-ping thread to prevent shutdown ===
+
+def keep_alive():
+
+    while True:
+
+        try:
+
+            if SELF_URL:
+
+                requests.get(SELF_URL)
+
+                print("[INFO] Self-ping successful")
+
+        except Exception as e:
+
+            print("[ERROR] Self-ping failed:", e)
+
+        time.sleep(600)  # ping every 10 minutes
+
+
+
+threading.Thread(target=keep_alive, daemon=True).start()
+
+
+
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
 
+    app.run(host='0.0.0.0', port=8080)
