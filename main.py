@@ -3,7 +3,7 @@ import fitz  # PyMuPDF
 import datetime
 import requests
 from telegram import Bot
-from flask import Flask
+from flask import Flask, request
 from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
 import logging
@@ -17,6 +17,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 try:
     BOT_TOKEN = os.environ["BOT_TOKEN"]
     CHAT_ID = os.environ["CHAT_ID"]
+    # A secret key to protect the manual trigger endpoint
+    TEST_TRIGGER_KEY = os.environ.get("TEST_TRIGGER_KEY", "default-secret-key")
 except KeyError as e:
     logging.critical(f"FATAL: Environment variable {e} not set. The application cannot start.")
     exit() # Exit if critical config is missing
@@ -108,6 +110,9 @@ def send_daily_prayers():
         raw_line = extract_tomorrows_prayers(tomorrow)
         if not raw_line:
             logging.error("No prayer time data found after parsing the PDF.")
+            # **NEW**: Send a specific alert when the date is not found
+            date_to_find = tomorrow.strftime('%d-%b')
+            bot.send_message(chat_id=CHAT_ID, text=f"🔍 **Parsing Error** 🔍\n\nCould not find the prayer times for tomorrow ({date_to_find}) in the PDF. Please check the PDF's date format.")
             return
 
         parts = raw_line.split()
@@ -115,6 +120,7 @@ def send_daily_prayers():
         # Example line: '24-Sep Tue 04:47 05:58 12:06 15:15 18:13 19:24' -> 8 parts
         if len(parts) < 8:
             logging.error(f"Line format error. Expected at least 8 parts, but got {len(parts)}: '{raw_line}'")
+            bot.send_message(chat_id=CHAT_ID, text=f"📄 **Parsing Error** 📄\n\nFound the line for tomorrow, but the format was incorrect:\n`{raw_line}`")
             return
 
         date_str = tomorrow.strftime("%A, %d %B %Y") # e.g., "Tuesday, 23 September 2025"
@@ -156,9 +162,9 @@ def send_daily_prayers():
 # === SCHEDULER SETUP ===
 scheduler = BackgroundScheduler(timezone=pytz.timezone("Asia/Colombo"))
 # Schedule the job to run every day at 18:30 (6:30 PM) Colombo time.
-scheduler.add_job(send_daily_prayers, trigger='cron', hour=9, minute=42)
+scheduler.add_job(send_daily_prayers, trigger='cron', hour=9, minute=53)
 scheduler.start()
-logging.info("Scheduler started. Job is scheduled for 6:30 PM (Asia/Colombo) daily.")
+logging.info("Scheduler started. Job is scheduled for 9:53 AM (Asia/Colombo) daily.")
 
 
 # === FLASK WEB SERVER ===
@@ -170,8 +176,26 @@ def home():
     """A simple endpoint to confirm the bot is running."""
     return "Prayer Times Bot is alive and the scheduler is running."
 
+@app.route('/test-prayers')
+def test_prayers():
+    """
+    **NEW**: A manual trigger for the prayer time job for easy debugging.
+    Protect it with a secret key.
+    """
+    # Check for a 'key' query parameter to prevent unauthorized triggers
+    provided_key = request.args.get('key')
+    if provided_key != TEST_TRIGGER_KEY:
+        return "Unauthorized", 401
+    
+    logging.info("Manual trigger received for 'send_daily_prayers'.")
+    # Run the job in a separate thread so the web request returns immediately
+    scheduler.add_job(send_daily_prayers, 'date')
+    return "OK, triggered the prayer time job. Check your Telegram and the logs.", 200
+
+
 # The main entry point for the application.
 if __name__ == '__main__':
     # Use a specific port defined by Render or default to 8080.
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
+
