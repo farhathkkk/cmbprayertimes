@@ -62,8 +62,8 @@ def download_pdf_if_needed(target_date):
 def extract_tomorrows_prayers(tomorrow_date):
     """
     Extracts prayer times for a specific date from the local PDF.
-    This version is robust and handles cases where the date and times
-    are on the same line or on separate lines.
+    This version is more robust and handles cases where the date and times
+    are on the same line or on separate/subsequent lines.
     """
     try:
         doc = fitz.open(LOCAL_PDF_FILENAME)
@@ -86,16 +86,20 @@ def extract_tomorrows_prayers(tomorrow_date):
                 if len(parts) > 5:
                     logging.info(f"Found full prayer time line for '{tomorrow_str}': {cleaned_line}")
                     return cleaned_line
-                # Case 2: The line is JUST the date. The times must be on the next line.
+                
+                # Case 2: The line is JUST the date. We must find the next valid line with times.
                 elif i + 1 < len(lines):
-                    next_line = lines[i + 1].strip()
-                    # A quick check to make sure the next line looks like times (starts with a number)
-                    if next_line and next_line[0].isdigit():
-                        full_line = f"{cleaned_line} {next_line}"
-                        logging.info(f"Found date on one line and times on the next. Combined to: '{full_line}'")
-                        return full_line
+                    # Search from the next line onwards for a line that looks like times
+                    for next_line_candidate in lines[i+1:]:
+                        cleaned_next_line = next_line_candidate.strip()
+                        # The next valid line should not be empty and should start with a number (the time)
+                        if cleaned_next_line and cleaned_next_line[0].isdigit():
+                            full_line = f"{cleaned_line} {cleaned_next_line}"
+                            logging.info(f"Found date on one line and times on a subsequent line. Combined to: '{full_line}'")
+                            return full_line
+                    # If we loop through all subsequent lines and find nothing, this match was a dud.
     
-    logging.warning(f"Could not find prayer times for date string '{tomorrow_str}' in the PDF.")
+    logging.warning(f"Could not find a valid prayer time entry for date string '{tomorrow_str}' in the PDF.")
     return None
 
 def send_daily_prayers():
